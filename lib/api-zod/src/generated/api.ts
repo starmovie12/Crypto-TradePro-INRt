@@ -134,6 +134,19 @@ export const CloseAllPositionsResponse = zod.object({
 
 
 /**
+ * @summary Add mock funds to the paper wallet
+ */
+export const AddFundsBody = zod.object({
+  "amount": zod.number()
+})
+
+export const AddFundsResponse = zod.object({
+  "walletBalance": zod.number(),
+  "availableBalance": zod.number()
+})
+
+
+/**
  * @summary Get structured AI advisor recommendations
  */
 export const GetAdvisorRecommendationsResponseItem = zod.object({
@@ -174,5 +187,3 @@ export const CreatePaperOrderResponse = zod.object({
   "stopPrice": zod.number(),
   "status": zod.enum(['open', 'target-hit', 'stop-hit', 'closed'])
 })
-
-
