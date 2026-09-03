@@ -10,6 +10,14 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: market
+    description: Live market data
+  - name: portfolio
+    description: Wallet and positions
+  - name: advisor
+    description: AI trade ideas
+  - name: orders
+    description: Paper order execution
 paths:
   /healthz:
     get:
@@ -24,6 +32,113 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /market/overview:
+    get:
+      operationId: getMarketOverview
+      tags: [market]
+      summary: Get the current market overview
+      responses:
+        "200":
+          description: Current market overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketOverview"
+  /market/option-chain:
+    get:
+      operationId: getOptionChain
+      tags: [market]
+      summary: Get the live option chain
+      parameters:
+        - name: symbol
+          in: query
+          required: false
+          schema:
+            type: string
+            default: BTCUSDT
+      responses:
+        "200":
+          description: Current option chain
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OptionChainRow"
+  /portfolio:
+    get:
+      operationId: getPortfolio
+      tags: [portfolio]
+      summary: Get wallet, positions, and recent activity
+      responses:
+        "200":
+          description: Portfolio summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Portfolio"
+  /portfolio/positions/{id}/close:
+    post:
+      operationId: closePosition
+      tags: [portfolio]
+      summary: Close one paper position
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Closed position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeActivity"
+  /portfolio/close-all:
+    post:
+      operationId: closeAllPositions
+      tags: [portfolio]
+      summary: Close every open paper position
+      responses:
+        "200":
+          description: Updated portfolio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Portfolio"
+  /advisor/recommendations:
+    get:
+      operationId: getAdvisorRecommendations
+      tags: [advisor]
+      summary: Get structured AI advisor recommendations
+      responses:
+        "200":
+          description: Advisor recommendations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdvisorRecommendation"
+  /orders/paper:
+    post:
+      operationId: createPaperOrder
+      tags: [orders]
+      summary: Simulate a bracket order using paper funds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaperOrderInput"
+      responses:
+        "201":
+          description: Paper position created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Position"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +148,88 @@ components:
           type: string
       required:
         - status
+    MarketOverview:
+      type: object
+      required: [spotPrice, change24h, volume24h, fundingRate, currencyRate, lastUpdated, connectionState]
+      properties:
+        spotPrice: { type: number }
+        change24h: { type: number }
+        volume24h: { type: number }
+        fundingRate: { type: number }
+        currencyRate: { type: number }
+        lastUpdated: { type: string }
+        connectionState: { type: string, enum: [connected, reconnecting, offline] }
+    OptionChainRow:
+      type: object
+      required: [id, strike, callLtp, callChange, callVolume, putLtp, putChange, putVolume, isAtm]
+      properties:
+        id: { type: string }
+        strike: { type: number }
+        callLtp: { type: number }
+        callChange: { type: number }
+        callVolume: { type: number }
+        putLtp: { type: number }
+        putChange: { type: number }
+        putVolume: { type: number }
+        isAtm: { type: boolean }
+    Position:
+      type: object
+      required: [id, instrument, side, entryPrice, livePrice, quantity, pnl, pnlPercent, targetPrice, stopPrice, status]
+      properties:
+        id: { type: string }
+        instrument: { type: string }
+        side: { type: string, enum: [CE, PE] }
+        entryPrice: { type: number }
+        livePrice: { type: number }
+        quantity: { type: number }
+        pnl: { type: number }
+        pnlPercent: { type: number }
+        targetPrice: { type: number }
+        stopPrice: { type: number }
+        status: { type: string, enum: [open, target-hit, stop-hit, closed] }
+    TradeActivity:
+      type: object
+      required: [id, type, instrument, price, quantity, timestamp]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        instrument: { type: string }
+        price: { type: number }
+        quantity: { type: number }
+        timestamp: { type: string }
+    Portfolio:
+      type: object
+      required: [walletBalance, availableBalance, totalPnl, positions, activity]
+      properties:
+        walletBalance: { type: number }
+        availableBalance: { type: number }
+        totalPnl: { type: number }
+        positions:
+          type: array
+          items: { $ref: "#/components/schemas/Position" }
+        activity:
+          type: array
+          items: { $ref: "#/components/schemas/TradeActivity" }
+    AdvisorRecommendation:
+      type: object
+      required: [id, title, body, instrument, strike, direction, confidence, createdAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        body: { type: string }
+        instrument: { type: string }
+        strike: { type: number }
+        direction: { type: string, enum: [bullish, bearish, neutral] }
+        confidence: { type: number }
+        createdAt: { type: string }
+    PaperOrderInput:
+      type: object
+      required: [instrument, side, entryPrice, quantity, targetPercent, stopPercent]
+      properties:
+        instrument: { type: string }
+        side: { type: string, enum: [CE, PE] }
+        entryPrice: { type: number }
+        quantity: { type: number }
+        targetPercent: { type: number }
+        stopPercent: { type: number }
 

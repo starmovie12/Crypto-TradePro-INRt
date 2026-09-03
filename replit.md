@@ -1,6 +1,6 @@
-# [Project name]
+# Crypto TradePro INR
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A mobile-first Binance crypto options dashboard with INR-only pricing, safe Paper Trading, bracket orders, AI trade ideas, and portfolio tracking.
 
 ## Run & Operate
 
@@ -22,23 +22,33 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/crypto-tradepro/src/App.tsx` — responsive trading cockpit and route-level screens
+- `artifacts/crypto-tradepro/src/index.css` — palette, typography, motion, and chart surface tokens
+- `lib/api-spec/openapi.yaml` — source of truth for market, portfolio, advisor, and paper-order contracts
+- `artifacts/api-server/src/routes/tradepro.ts` — safe in-memory development API and paper order math
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Paper mode is the default and the only mode that can place orders in the current build; Live mode stays visibly locked until a server-side Binance connection is configured.
+- All values exposed to the UI are INR-denominated; the frontend never accepts or renders Binance credentials.
+- The frontend uses a sub-second reactive market simulation in Paper mode so chain, spot, and portfolio values visibly move without REST polling.
+- Advisor recommendations are read-only and the paper order endpoint is separate from the advisor endpoint.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Market desk with BTC option chain, ATM marker, strike focus chart, live connection indicator, and bracket order sheet.
+- Paper wallet with mock fund deposits, target/stop preview, active positions, close-one, close-all, and activity history.
+- AI Advisor conversation surface with structured recommendations and chart deep links.
+- Settings for Paper/Live environment, Confirm before send vs Instant execute, and server-side security guardrails.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- User requested the complete website from the attached Crypto TradePro INR PRD without missing product flows.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Keep product copy and fallback data aligned to Binance BTC options; do not reintroduce equity/NIFTY/NSE terminology.
+- After changing `lib/api-spec/openapi.yaml`, run `pnpm --filter @workspace/api-spec run codegen` before touching generated API types.
 
 ## Pointers
 

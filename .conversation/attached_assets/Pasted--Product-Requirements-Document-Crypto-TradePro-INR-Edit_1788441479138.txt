@@ -1,0 +1,221 @@
+# Product Requirements Document — Crypto TradePro (INR Edition)
+
+**Status:** Draft v1
+**Owner:** Ail
+**Platform:** Mobile-first web app (PWA-ready)
+**Exchange:** Binance (Spot + Futures)
+
+---
+
+## 1. Overview
+
+Crypto TradePro is a **manual** crypto options/futures trading dashboard. The user
+watches a live option chain, gets AI-generated trade ideas, and taps a button
+to execute — the AI never places an order on its own. The app runs on real
+Binance data end-to-end but is priced entirely in INR, and ships with a Paper
+Trading mode so the full flow (chain → AI signal → bracket order → P&L) can be
+proven safe before any real money is at risk.
+
+### Explicit non-goals
+- **No autonomous execution.** The AI Advisor may only *suggest* — it must never
+  call an order-placement endpoint itself. Every Buy/Sell is a human tap.
+- **No multi-exchange abstraction in v1.** Deribit or other options-native
+  exchanges are out of scope for this version; the architecture should not be
+  blocked from adding them later, but nothing should be built for them now.
+
+---
+
+## 2. Users & Platform
+
+- Single user (personal trading tool), optimized for one-handed phone use.
+- Bottom navigation: **Home (Option Chain)** · **Portfolio** · **AI Advisor** · **Settings**.
+- Professional dark-mode theme, large tap targets, no unnecessary page reloads —
+  everything updates live via WebSocket.
+
+---
+
+## 3. Currency Handling
+
+Binance returns everything in USD/USDT. The **entire UI** — option chain
+premiums, chart axes, P&L, wallet balance — must render in INR only.
+
+- Fetch a live USD→INR rate (fallback to a configurable static rate if the
+  rate API is unreachable).
+- A single `useCurrencyConverter` hook multiplies incoming WebSocket/REST data
+  by this rate before it reaches any component. Components never see raw USD.
+- When the user places a **Live** order, the INR amount they typed must be
+  converted back to USDT before it's sent to Binance — this conversion should
+  happen in exactly one place in the code (the order-submission service), not
+  duplicated across components, to avoid two different rates being used by
+  mistake.
+
+---
+
+## 4. Real-Time Price Updates — Critical Requirement
+
+**Observed problem in the current build:** the price on screen freezes at one
+value and only jumps after a few seconds, instead of moving continuously.
+This is treated as a launch blocker, not a nice-to-have — a trading dashboard
+where the visible price lags the real market is actively dangerous, since the
+user is making Buy/Sell decisions off a stale number.
+
+**Required behavior:** every price shown on screen (option chain LTP, chart,
+ATM marker, open-position P&L) must update the instant new data arrives on
+the WebSocket — sub-second, not "every few seconds."
+
+**Likely causes to check, in order:**
+1. **Polling instead of streaming.** If any price on the page is being
+   fetched with a `setInterval` + REST call instead of read from the open
+   WebSocket, that's the stall — REST polling is inherently a few seconds
+   behind. Every live price on the page must come from the WebSocket
+   subscription, not a timer.
+2. **React re-render not triggered by new data.** If the WebSocket message
+   handler updates a plain variable instead of state (or updates state that
+   nothing on screen is subscribed to), the DOM won't repaint even though
+   correct data arrived. The incoming tick must go through `setState` /
+   Zustand's store update on every message, not just on some of them.
+3. **Throttling/debouncing set too aggressively.** If updates are intentionally
+   batched (e.g. "update UI once per second") to reduce re-renders, that
+   batching interval is itself the multi-second delay the user is seeing —
+   this needs to be removed or reduced, not treated as expected behavior.
+4. **A single stale WebSocket connection.** If the socket silently disconnects
+   (network blip, tab backgrounded, exchange-side timeout) and isn't
+   auto-reconnected, the UI will keep showing the last price it received
+   forever, which looks exactly like "it stops and then jumps" once it does
+   reconnect. There must be an automatic reconnect-with-backoff on disconnect,
+   and ideally a small visual indicator (e.g. a dot) showing live-connected
+   vs reconnecting, so a frozen price is never mistaken for a real quote.
+
+Whichever of these is the actual cause, it must be fixed before this app is
+trusted with either Paper or Live money — a delayed price defeats the purpose
+of the 5%-target / stop-loss bracket logic in Section 5.3, since the
+target/stop math is only meaningful against a price that's actually current.
+
+## 5. Core Features
+
+### 4.1 Live Option Chain (Home)
+- Classic layout: Calls (left) · Strike price (center) · Puts (right).
+- Per strike: LTP (INR), Volume, Change %.
+- The strike nearest the current spot price is visually marked **ATM**.
+- `Buy CE` / `Buy PE` button on every row → opens the Bracket Order sheet (4.2).
+- Tapping any row (not just Buy) opens that strike's live candlestick chart
+  (TradingView Lightweight Charts), so the user can inspect before buying.
+
+### 4.2 Smart Bracket Order (Buy Sheet)
+A bottom-sheet modal on tap of Buy CE/PE:
+
+| Field | Default | Notes |
+|---|---|---|
+| Entry price | Market | Limit optional |
+| Quantity / lot size | — | required |
+| Target % | 5% | editable |
+| Stop-Loss % | 20% | editable |
+
+On confirm: `sell_target = entry × (1 + target%)`, `sell_stop = entry × (1 − sl%)`,
+shown in INR before the user confirms.
+
+**Execution mode toggle** (per the user's clarification with the AI in the
+build conversation): a setting for **Confirm before send** vs **Instant
+execute**, so normal trading stays safe and fast-moving setups can skip the
+extra tap.
+
+### 4.3 Order Execution Logic — Binance-specific (important)
+
+The exchange does not treat "buy + target + stop-loss" as one atomic action
+the way a simple prompt might imply. Spot and Futures also work differently,
+and the backend must handle both correctly:
+
+**Binance Spot:**
+1. Place the market Buy. Wait for the fill confirmation and the *exact* filled
+   quantity/price (do not assume the requested price = fill price).
+2. Only after the fill, place a native **OCO** order (`target` limit sell +
+   `stop-loss` stop-limit sell) using the *actual* filled quantity. Binance's
+   own matching engine then auto-cancels whichever leg doesn't fill — this
+   part genuinely is automatic once the OCO is live.
+3. **Gap to handle:** the Buy and the OCO placement are two separate API
+   calls, not one. If the backend crashes or errors between step 1 and step 2,
+   the position is bought but **unprotected** — no stop-loss is resting on the
+   exchange. The backend must treat "fill confirmed but OCO not yet placed" as
+   an alerting condition (retry the OCO placement; surface a warning in the
+   UI if it can't).
+
+**Binance Futures:**
+- Futures has no single OCO order type. The backend places two independent
+  `reduce-only` conditional orders — Take-Profit and Stop-Loss — against the
+  open position.
+- Nothing on Binance's side auto-cancels the sibling order. The **backend is
+  responsible** for listening to the account's user-data WebSocket stream
+  (order-fill events) and cancelling the other order itself the moment one
+  fills. Do this via the stream, not by polling — polling introduces exactly
+  the kind of delay this feature exists to avoid.
+- On backend restart, reconcile open positions against open orders before
+  resuming — a crash mid-trade can otherwise leave both TP and SL sitting
+  live at once, or neither.
+
+This logic belongs in the backend order service, isolated from the UI, so it
+can be tested independently of the chain/chart components.
+
+### 4.4 Paper Trading vs. Live Trading
+- Global toggle in the header: **Paper** / **Live**.
+- **Paper mode:**
+  - "Add Mock Funds" — deposit any INR amount into a local mock wallet.
+  - Orders never reach Binance. A mock execution engine watches the same live
+    WebSocket prices and simulates fills, targets, and stop-losses against the
+    mock wallet, using the identical bracket-order math as Live mode (so
+    testing the UI actually validates the real logic).
+  - Mock P&L and mock positions are clearly labeled as such everywhere they
+    appear (color/badge), so Paper and Live can never be visually confused.
+- **Live mode:** orders route through `ccxt` to the real Binance account.
+- Recommended flow: run Paper mode until behavior looks correct and stable,
+  then switch to Live with real funds.
+
+### 4.5 AI Advisor
+- Dedicated tab / floating panel.
+- Backend periodically pulls option-chain data (price, volume, liquidity) and
+  sends it to an LLM, which returns a structured recommendation (e.g. "BTC
+  96000 PE showing strong momentum near ₹205").
+- Each recommendation renders as a chat message with an **Open Chart** button
+  that deep-links to that exact strike's live chart.
+- The Advisor **only recommends**. It has no access to order-placement
+  functions — this should be enforced at the API layer (the LLM-facing
+  service should not even have the execution function available to call), not
+  just left as a UI convention.
+
+### 4.6 Portfolio / Account
+- Active positions: instrument, avg. buy price, live price, live unrealized
+  P&L (INR, green/red).
+- Wallet balance (converted to INR).
+- One-tap **Close** per position, and a **Close All** for emergencies.
+
+---
+
+## 6. Security Requirements
+
+- API Key and Secret are **never** entered in the frontend and never pasted
+  into any AI chat. They live only in a server-side `.env` file, read by the
+  backend order service.
+- Withdrawal permission must **never** be enabled on the Binance API key used
+  by this app — Reading + Trading only.
+- All signed requests to Binance happen server-side; the frontend only ever
+  talks to this app's own backend.
+
+---
+
+## 7. Technical Architecture
+
+- **Frontend:** Next.js (React), TypeScript, Tailwind CSS, Zustand for wallet/mode state.
+- **Backend:** Node.js via Next.js API routes.
+- **Exchange integration:** `ccxt` (Binance Spot + Futures).
+- **Real-time data:** WebSocket subscriptions for chain prices and chart candles; user-data stream for order/fill events (see 4.3).
+- **Charts:** TradingView Lightweight Charts.
+
+---
+
+## 8. Instructions for the Developer / Coding Assistant
+
+1. Acknowledge this PRD and ask about anything that's ambiguous before writing code.
+2. Propose the folder structure first (frontend routes/components, backend API routes, order-execution service module, currency-conversion utility).
+3. List the terminal commands to install all dependencies (`ccxt`, `lightweight-charts`, `zustand`, etc.).
+4. Build in this order: (a) currency-conversion hook, (b) Option Chain UI on mock/static data, (c) Bracket Order sheet UI, (d) backend order-execution service with the Spot/Futures logic in Section 5.3, (e) Paper Trading engine reusing the same bracket-order math, (f) WebSocket wiring for live prices, (g) AI Advisor panel, (h) Portfolio screen.
+5. Keep the exchange-specific code (Section 5.3) isolated behind a single service so it can be unit-tested without a live Binance connection.
+6. Fix the real-time price staleness described in Section 4 as an early priority — every other feature depends on the displayed price actually being current.

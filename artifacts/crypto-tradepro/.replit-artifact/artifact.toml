@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Crypto TradePro INR"
+description = "A mobile-first crypto options and futures trading dashboard priced entirely in INR, with live-style market updates, Paper Trading, bracket orders, AI guidance, and portfolio tracking."
+version = "1.0.0"
+id = "artifacts/crypto-tradepro"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18925
+
+[services.development]
+run = "pnpm --filter @workspace/crypto-tradepro run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/crypto-tradepro", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/crypto-tradepro/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18925"
+BASE_PATH = "/"
