@@ -107,6 +107,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Portfolio"
+  /portfolio/add-funds:
+    post:
+      operationId: addFunds
+      tags: [portfolio]
+      summary: Add mock funds to the paper wallet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddFundsInput"
+      responses:
+        "200":
+          description: Updated wallet balances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddFundsResult"
   /advisor/recommendations:
     get:
       operationId: getAdvisorRecommendations
@@ -232,4 +250,14 @@ components:
         quantity: { type: number }
         targetPercent: { type: number }
         stopPercent: { type: number }
-
+    AddFundsInput:
+      type: object
+      required: [amount]
+      properties:
+        amount: { type: number }
+    AddFundsResult:
+      type: object
+      required: [walletBalance, availableBalance]
+      properties:
+        walletBalance: { type: number }
+        availableBalance: { type: number }
