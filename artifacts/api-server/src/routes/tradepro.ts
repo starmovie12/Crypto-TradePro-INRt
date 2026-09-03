@@ -48,7 +48,6 @@ const quoteStartedAt = Date.now();
 const wallet = {
   balance: 250_000,
   marginUsed: 205 * 0.02 * 100, // matches the seeded open position below
-  realizedPnl: 0,
 };
 
 const positions: Position[] = [
@@ -98,7 +97,6 @@ function settlePosition(position: Position, status: "closed" | "target-hit" | "s
   const marginForPosition = position.entryPrice * position.quantity * 100;
   // Open P&L becomes settled balance only after an exit is confirmed.
   wallet.balance += position.pnl;
-  wallet.realizedPnl += position.pnl;
   wallet.marginUsed = Math.max(0, wallet.marginUsed - marginForPosition);
   position.status = status;
 }
@@ -109,7 +107,6 @@ function portfolioSnapshot() {
     walletBalance: Number(wallet.balance.toFixed(2)),
     availableBalance: Number(availableBalance().toFixed(2)),
     totalPnl: Number(currentPositions.reduce((sum, position) => sum + position.pnl, 0).toFixed(2)),
-    realizedPnl: Number(wallet.realizedPnl.toFixed(2)),
     positions: currentPositions,
     activity,
   };
