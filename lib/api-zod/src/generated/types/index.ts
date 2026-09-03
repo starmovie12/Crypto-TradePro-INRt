@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './addFundsInput';
+export * from './addFundsResult';
 export * from './advisorRecommendation';
 export * from './advisorRecommendationDirection';
 export * from './getOptionChainParams';
