@@ -9,7 +9,7 @@ import {
   TrendingUp, X, Zap,
 } from 'lucide-react';
 import {
-  useCloseAllPositions, useClosePosition, useCreatePaperOrder, useGetAdvisorRecommendations,
+  useAddFunds, useCloseAllPositions, useClosePosition, useCreatePaperOrder, useGetAdvisorRecommendations,
   useGetMarketOverview, useGetOptionChain, useGetPortfolio, useHealthCheck,
 } from '@workspace/api-client-react';
 import type {
