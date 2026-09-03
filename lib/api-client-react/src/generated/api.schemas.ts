@@ -126,7 +126,15 @@ export interface PaperOrderInput {
   stopPercent: number;
 }
 
+export interface AddFundsInput {
+  amount: number;
+}
+
+export interface AddFundsResult {
+  walletBalance: number;
+  availableBalance: number;
+}
+
 export type GetOptionChainParams = {
 symbol?: string;
 };
-
