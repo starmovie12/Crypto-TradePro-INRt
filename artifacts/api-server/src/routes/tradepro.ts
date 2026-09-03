@@ -36,6 +36,7 @@ type Activity = {
 };
 
 const router: IRouter = Router();
+const quoteStartedAt = Date.now();
 
 const positions: Position[] = [
   {
@@ -71,6 +72,21 @@ const activity: Activity[] = [
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
   },
 ];
+
+function refreshPaperQuotes() {
+  const elapsed = (Date.now() - quoteStartedAt) / 1000;
+  positions.forEach((position, index) => {
+    if (position.status !== "open") return;
+    const volatility = Math.max(2, position.entryPrice * 0.015);
+    position.livePrice = Number(
+      Math.max(0.01, position.entryPrice + Math.sin(elapsed / 3 + index * 1.3) * volatility).toFixed(2),
+    );
+    position.pnl = Number(((position.livePrice - position.entryPrice) * position.quantity * 100).toFixed(2));
+    position.pnlPercent = Number(
+      (((position.livePrice - position.entryPrice) / position.entryPrice) * 100).toFixed(2),
+    );
+  });
+}
 
 router.get("/market/overview", (_req, res) => {
   res.json(
@@ -108,6 +124,7 @@ router.get("/market/option-chain", (req, res) => {
 });
 
 router.get("/portfolio", (_req, res) => {
+  refreshPaperQuotes();
   const openPositions = positions.filter((position) => position.status === "open");
   const totalPnl = openPositions.reduce((sum, position) => sum + position.pnl, 0);
   res.json(
@@ -146,6 +163,7 @@ router.post("/portfolio/positions/:id/close", (req, res) => {
 });
 
 router.post("/portfolio/close-all", (_req, res) => {
+  refreshPaperQuotes();
   const now = new Date().toISOString();
   positions.forEach((position) => {
     if (position.status === "open") {
@@ -162,9 +180,9 @@ router.post("/portfolio/close-all", (_req, res) => {
   });
   res.json(
     CloseAllPositionsResponse.parse({
-      walletBalance: 250_288,
-      availableBalance: 250_288,
-      totalPnl: 288,
+      walletBalance: 250_000,
+      availableBalance: 250_000,
+      totalPnl: 0,
       positions: [],
       activity,
     }),
