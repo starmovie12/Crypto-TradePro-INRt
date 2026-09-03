@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
 import {
+  AddFundsBody,
+  AddFundsResponse,
   CloseAllPositionsResponse,
   ClosePositionParams,
   ClosePositionResponse,
@@ -37,6 +39,16 @@ type Activity = {
 
 const router: IRouter = Router();
 const quoteStartedAt = Date.now();
+
+// wallet.balance = settled paper funds (deposits + realized P&L from closed
+// trades), not yet reduced by capital locked in open positions.
+// wallet.marginUsed = capital currently committed to open positions
+// (entryPrice * quantity * 100 per position, summed).
+// availableBalance shown to the UI is always wallet.balance - wallet.marginUsed.
+const wallet = {
+  balance: 250_000,
+  marginUsed: 205 * 0.02 * 100, // matches the seeded open position below
+};
 
 const positions: Position[] = [
   {
@@ -129,8 +141,11 @@ router.get("/portfolio", (_req, res) => {
   const totalPnl = openPositions.reduce((sum, position) => sum + position.pnl, 0);
   res.json(
     GetPortfolioResponse.parse({
-      walletBalance: 250_000 + totalPnl,
-      availableBalance: 245_900,
+      // Open P&L is unrealized (mark-to-market on open positions), so it is
+      // shown alongside the settled balance but not folded into it here.
+      // It only hits wallet.balance for real when a position is closed.
+      walletBalance: wallet.balance,
+      availableBalance: Math.max(0, wallet.balance - wallet.marginUsed),
       totalPnl,
       positions: openPositions,
       activity,
@@ -139,12 +154,21 @@ router.get("/portfolio", (_req, res) => {
 });
 
 router.post("/portfolio/positions/:id/close", (req, res) => {
+  refreshPaperQuotes();
   const { id } = ClosePositionParams.parse(req.params);
   const position = positions.find((item) => item.id === id);
   if (!position) {
     res.status(404).json({ error: "Position not found" });
     return;
   }
+  if (position.status !== "open") {
+    res.status(409).json({ error: "Position already closed" });
+    return;
+  }
+  const marginForPosition = position.entryPrice * position.quantity * 100;
+  // Realize this position's P&L into the settled balance and release its margin.
+  wallet.balance += position.pnl;
+  wallet.marginUsed = Math.max(0, wallet.marginUsed - marginForPosition);
   position.status = "closed";
   const closed = {
     id: `close-${Date.now()}`,
@@ -167,6 +191,9 @@ router.post("/portfolio/close-all", (_req, res) => {
   const now = new Date().toISOString();
   positions.forEach((position) => {
     if (position.status === "open") {
+      // Realize each position's P&L into the settled balance and release its margin.
+      wallet.balance += position.pnl;
+      wallet.marginUsed = Math.max(0, wallet.marginUsed - position.entryPrice * position.quantity * 100);
       position.status = "closed";
       activity.unshift({
         id: `close-${position.id}`,
@@ -180,11 +207,30 @@ router.post("/portfolio/close-all", (_req, res) => {
   });
   res.json(
     CloseAllPositionsResponse.parse({
-      walletBalance: 250_000,
-      availableBalance: 250_000,
+      walletBalance: wallet.balance,
+      availableBalance: Math.max(0, wallet.balance - wallet.marginUsed),
       totalPnl: 0,
       positions: [],
       activity,
+    }),
+  );
+});
+
+router.post("/portfolio/add-funds", (req, res) => {
+  const body = AddFundsBody.parse(req.body);
+  wallet.balance += body.amount;
+  activity.unshift({
+    id: `funds-${Date.now()}`,
+    type: "Mock funds added",
+    instrument: "INR wallet",
+    price: body.amount,
+    quantity: 1,
+    timestamp: new Date().toISOString(),
+  });
+  res.json(
+    AddFundsResponse.parse({
+      walletBalance: wallet.balance,
+      availableBalance: Math.max(0, wallet.balance - wallet.marginUsed),
     }),
   );
 });
@@ -218,6 +264,13 @@ router.get("/advisor/recommendations", (_req, res) => {
 
 router.post("/orders/paper", (req, res) => {
   const body = CreatePaperOrderBody.parse(req.body);
+  const orderCost = body.entryPrice * body.quantity * 100;
+  const available = wallet.balance - wallet.marginUsed;
+  if (orderCost > available) {
+    res.status(422).json({ error: "Insufficient available balance for this order" });
+    return;
+  }
+  wallet.marginUsed += orderCost;
   const targetPrice = Number((body.entryPrice * (1 + body.targetPercent / 100)).toFixed(2));
   const stopPrice = Number((body.entryPrice * (1 - body.stopPercent / 100)).toFixed(2));
   const position = {
